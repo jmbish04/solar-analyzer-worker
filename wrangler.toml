@@ -1,0 +1,26 @@
+name = "solar-analyzer-worker"
+main = "dist/src/index.js"
+compatibility_date = "2024-11-11"
+compatibility_flags = [
+  "global_fetch_strictly_public"
+]
+
+[assets]
+directory = "./public"
+
+[observability]
+enabled = true
+
+[build]
+command = "npm run build"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "solar-analysis"
+database_id = "753f91f2-ca20-4d54-aace-04c17c89632e"
+
+[ai]
+binding = "AI"
+
+[vars]
+AI_TEXT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"

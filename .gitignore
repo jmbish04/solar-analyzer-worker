@@ -1,0 +1,60 @@
+# Ignore local development environment variables
+.dev.vars
+
+# Node modules (if using bundlers like Vite, esbuild, or webpack)
+node_modules/
+
+# Build output directories
+dist/
+build/
+.bundle/
+
+# Local environment config
+.env
+.env.*
+
+# Logs
+*.log
+
+# VSCode and other IDE settings
+.vscode/
+.idea/
+
+# macOS artifacts
+.DS_Store
+
+# Optional: wrangler config if it's machine/user-specific
+wrangler.toml.local
+
+# npm / yarn / pnpm artifacts
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+.env
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

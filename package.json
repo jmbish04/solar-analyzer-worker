@@ -1,0 +1,24 @@
+{
+	"name": "solar-analyzer-worker",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"build": "tsc",
+		"deploy": "npm run build && wrangler deploy && python3 test-worker-api.py",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"test": "vitest",
+		"cf-typegen": "wrangler types"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "^0.8.19",
+		"@cloudflare/workers-types": "^4.20250726.0",
+		"typescript": "^5.5.2",
+		"vitest": "~3.2.0",
+		"wrangler": "^4.21.0"
+	},
+	"dependencies": {
+		"@google/generative-ai": "^0.24.1",
+		"jose": "^6.0.12"
+	}
+}

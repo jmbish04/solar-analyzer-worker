@@ -1,0 +1,213 @@
+openapi: 3.0.0
+info:
+  title: Solar Financial Analysis Worker API
+  version: 1.2.0
+  description: API for the Solar Financial Analysis Tool, including admin and data management endpoints.
+servers:
+  - url: https://solar-analyzer-worker.hacolby.workers.dev
+paths:
+  /admin/login:
+    post:
+      summary: Authenticate as admin
+      description: Verifies the admin password and returns a session token on success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Authentication successful.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+        '401':
+          description: Unauthorized.
+  /config:
+    get:
+      summary: Get solar array configuration
+      description: Retrieves the current solar array configuration from the database.
+      responses:
+        '200':
+          description: Current solar array configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolarConfig'
+    post:
+      summary: Update solar array configuration
+      description: Updates the solar array configuration in the database.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolarConfig'
+      responses:
+        '200':
+          description: Configuration updated successfully.
+  /rates/pge:
+    get:
+      summary: Get PGE rates
+      description: Retrieves the currently stored PGE rates from the D1 database.
+      responses:
+        '200':
+          description: Stored PGE rates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PgeRates'
+    post:
+      summary: Manually update PGE rates
+      description: Allows for the manual update of PGE rates if scraping fails.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PgeRates'
+      responses:
+        '200':
+          description: PGE rates updated successfully.
+  /refresh/pge-rates:
+    post:
+      summary: Refresh PGE rates from URL
+      description: Triggers the worker to scrape PGE rate data from a PDF at a given URL.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: Optional URL to the PGE tariff PDF. If not provided, a default URL is used.
+      responses:
+        '200':
+          description: PGE rate refresh process initiated.
+  /refresh/other-data:
+    post:
+      summary: Refresh other data
+      description: Placeholder for refreshing other data sources.
+      responses:
+        '501':
+          description: Not Implemented.
+  /data-status/{dataType}:
+    get:
+      summary: Get latest data timestamp
+      description: Retrieves the timestamp of the most recent entry for a given data type.
+      parameters:
+        - name: dataType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [sunrise-sunset, pvwatts]
+      responses:
+        '200':
+          description: The most recent date for the specified data type.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lastRecordedDate:
+                    type: string
+                    format: date
+  /backfill/pvwatts:
+    post:
+      summary: Backfill PVWatts data
+      description: Backfills historical PVWatts data for a given date range.
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: The number of newly inserted records.
+  /backfill/sunrise_sunset:
+    post:
+      summary: Backfill sunrise/sunset data
+      description: Backfills historical sunrise/sunset data for a given date range.
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: The number of newly inserted records.
+
+components:
+  schemas:
+    SolarConfig:
+      type: object
+      properties:
+        panelCount:
+          type: integer
+        panelOutputWatts:
+          type: integer
+        systemCapacityKw:
+          type: number
+        panelTilt:
+          type: number
+        panelAzimuth:
+          type: number
+        latitude:
+          type: number
+        longitude:
+          type: number
+    PgeRates:
+      type: object
+      properties:
+        effectiveDate:
+          type: string
+          format: date
+        url:
+          type: string
+          format: uri
+        summer:
+          type: object
+          properties:
+            peak:
+              type: number
+            partialPeak:
+              type: number
+            offPeak:
+              type: number
+        winter:
+          type: object
+          properties:
+            peak:
+              type: number
+            partialPeak:
+              type: number
+            offPeak:
+              type: number
