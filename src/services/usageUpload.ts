@@ -12,6 +12,10 @@ function parseCsv(data: string): Array<Record<string, string>> {
   });
 }
 
+/**
+ * Extract hour from time string in format 'HH:MM'.
+ * Only the hour component is needed for hourly aggregation.
+ */
 function to24Hour(time: string): string {
   const [hour] = time.split(':');
   return hour.padStart(2, '0');

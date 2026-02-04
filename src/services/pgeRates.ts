@@ -32,7 +32,8 @@ export async function handleRefreshPgeRates(request: Request, env: Env): Promise
   const model = env.OPENAI_MODEL || 'gpt-4o-mini';
 
   const prompt = `
-    You are an expert on California utility rates. Provide typical PG&E EV2 electricity rate information.
+    You are an expert on California utility rates. Provide typical/estimated PG&E EV2 electricity rate information.
+    Note: These are estimated rates for demonstration and modeling purposes.
     
     **Instructions:**
     1. Provide electricity rates for **summer** and **winter** seasons. For each season, provide the cost per kWh for **peak**, **partial-peak**, and **off-peak** periods.
