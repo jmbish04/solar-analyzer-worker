@@ -1,12 +1,7 @@
-import { queryDB } from '../db/client';
+import { getDb } from '../db/client';
+import { pgeUsage, pvwattsHourly } from '../db/schema';
 import OpenAI from 'openai';
-
-interface HourRecord {
-  date: string;
-  hour: string;
-  usage: number;
-  pv: number;
-}
+import { and, between, eq } from 'drizzle-orm';
 
 const OFF_PEAK = 0.25;
 const PEAK = 0.35;
@@ -66,40 +61,57 @@ export async function handleNemAnalysis(request: Request, env: Env): Promise<Res
     return new Response('missing start or end', { status: 400 });
   }
 
-  const hours = await queryDB<HourRecord>(
-    env.DB,
-    `SELECT u.date, u.hour, u.usage, coalesce(p.ac_wh, 0) as pv
-     FROM pge_usage u
-     LEFT JOIN pvwatts_hourly p ON u.date = p.date AND u.hour = p.hour
-     WHERE u.date BETWEEN ? AND ?
-     ORDER BY u.date, u.hour`,
-    [startStr, endStr]
-  );
+  const db = getDb(env.DB);
+
+  // Get usage data
+  const usageData = await db
+    .select()
+    .from(pgeUsage)
+    .where(between(pgeUsage.date, startStr, endStr))
+    .orderBy(pgeUsage.date, pgeUsage.hour);
+
+  // Get PV data for the same date range
+  const pvData = await db
+    .select()
+    .from(pvwattsHourly)
+    .where(between(pvwattsHourly.date, startStr, endStr));
+
+  // Create a map for quick PV lookup
+  const pvMap = new Map<string, number>();
+  for (const pv of pvData) {
+    pvMap.set(`${pv.date}-${pv.hour}`, pv.acWh ?? 0);
+  }
 
   let costNEM2 = 0;
   let costNEM3 = 0;
   const detailedHours = [];
-  for (const h of hours) {
+
+  for (const h of usageData) {
     const rate = rateForHour(parseInt(h.hour));
-    const net = h.usage - h.pv;
+    const usage = h.usage ?? 0;
+    const pv = pvMap.get(`${h.date}-${h.hour}`) ?? 0;
+    const net = usage - pv;
     let hourlyDiff = 0;
 
     if (net >= 0) {
       costNEM2 += net * rate;
       costNEM3 += net * rate;
     } else {
-      const nem2Credit = net * rate; // negative credit
+      const nem2Credit = net * rate;
       const nem3Credit = net * rate * 0.75;
       costNEM2 += nem2Credit;
       costNEM3 += nem3Credit;
       hourlyDiff = nem3Credit - nem2Credit;
     }
-    detailedHours.push({ ...h, hourlyDiff });
+    detailedHours.push({ date: h.date, hour: h.hour, usage, pv, hourlyDiff });
   }
   const diff = costNEM3 - costNEM2;
 
   if (!env.OPENAI_API_KEY) {
-    return new Response('OPENAI_API_KEY is not configured', { status: 500 });
+    return new Response(JSON.stringify({ error: 'OPENAI_API_KEY is not configured' }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   const openai = new OpenAI({

@@ -54,8 +54,8 @@ CREATE TABLE IF NOT EXISTS sunrise_sunset (
     const response = await worker.fetch(request, env, ctx);
     await waitOnExecutionContext(ctx);
     expect(response.status).toBe(200);
-    const data = await env.DB.prepare('SELECT count(*) as c FROM pge_usage').first<any>();
-    expect(data.c).toBeGreaterThanOrEqual(1);
+    const responseData = await response.json() as any;
+    expect(responseData.inserted).toBe(1);
   });
 
   it('serves openapi spec', async () => {

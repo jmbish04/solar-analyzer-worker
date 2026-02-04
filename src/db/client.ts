@@ -1,12 +1,9 @@
-export async function queryDB<T>(db: D1Database, sql: string, params: unknown[] = []): Promise<T[]> {
-  const stmt = db.prepare(sql);
-  const res = await stmt.bind(...params).all<T>();
-  if (res.error) throw res.error;
-  return res.results as T[];
+import { drizzle } from 'drizzle-orm/d1';
+import * as schema from './schema';
+
+export function getDb(d1: D1Database) {
+  return drizzle(d1, { schema });
 }
 
-export async function execute(db: D1Database, sql: string, params: unknown[] = []): Promise<void> {
-  const stmt = db.prepare(sql);
-  const res = await stmt.bind(...params).run();
-  if (res.error) throw res.error;
-}
+export type DrizzleDb = ReturnType<typeof getDb>;
+

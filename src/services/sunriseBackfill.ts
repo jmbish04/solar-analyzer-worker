@@ -1,5 +1,7 @@
-import { execute, queryDB } from '../db/client';
+import { getDb } from '../db/client';
+import { sunriseSunset } from '../db/schema';
 import { dateRange } from '../utils';
+import { and, gte, lte } from 'drizzle-orm';
 
 type SunData = {
   sunrise: string;
@@ -37,12 +39,16 @@ export async function handleBackfillSunrise(request: Request, env: Env): Promise
     return new Response('missing start or end', { status: 400 });
   }
 
+  const db = getDb(env.DB);
   const start = new Date(startStr);
   const end = new Date(endStr);
   const dates = dateRange(start, end);
   let inserted = 0;
 
-  const existingDates = new Set((await queryDB<{ date: string }>(env.DB, `SELECT date FROM sunrise_sunset WHERE date >= ? AND date <= ?`, [startStr, endStr])).map(r => r.date));
+  const existingRecords = await db.select({ date: sunriseSunset.date })
+    .from(sunriseSunset)
+    .where(and(gte(sunriseSunset.date, startStr), lte(sunriseSunset.date, endStr)));
+  const existingDates = new Set(existingRecords.map(r => r.date));
 
   const promises = dates.map(async (date) => {
     if (existingDates.has(date)) return;
@@ -50,7 +56,12 @@ export async function handleBackfillSunrise(request: Request, env: Env): Promise
     const result = await fetchSun(date, lat, lon);
     if (!result) return;
 
-    await execute(env.DB, 'INSERT INTO sunrise_sunset (date, sunrise, sunset, sun_hours) VALUES (?, ?, ?, ?)', [date, result.sunrise, result.sunset, result.hours]);
+    await db.insert(sunriseSunset).values({
+      date,
+      sunrise: result.sunrise,
+      sunset: result.sunset,
+      sunHours: result.hours
+    });
     inserted++;
   });
 

@@ -1,9 +1,6 @@
 import OpenAI from 'openai';
-import { queryDB } from '../db/client';
-
-interface HourRecord {
-  usage: number;
-}
+import { getDb } from '../db/client';
+import { pgeUsage } from '../db/schema';
 
 async function generateEnhancedNem3Analysis(
   openai: OpenAI,
@@ -77,7 +74,10 @@ export async function handleNem3Model(request: Request, env: Env): Promise<Respo
   };
 
   if (!systemCapacity) {
-    return new Response('missing systemCapacity', { status: 400 });
+    return new Response(JSON.stringify({ error: 'missing systemCapacity' }), { 
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   const solarCostPerWatt = 3;
@@ -85,9 +85,11 @@ export async function handleNem3Model(request: Request, env: Env): Promise<Respo
 
   const newSystemCost = systemCapacity * 1000 * solarCostPerWatt + (batteryCapacity || 0) * batteryCostPerKwh;
 
+  const db = getDb(env.DB);
+  
   // Fetch historical usage data to project savings more accurately
-  const usageRecords = await queryDB<HourRecord>(env.DB, 'SELECT usage FROM pge_usage');
-  const totalUsage = usageRecords.reduce((acc, r) => acc + r.usage, 0);
+  const usageRecords = await db.select({ usage: pgeUsage.usage }).from(pgeUsage);
+  const totalUsage = usageRecords.reduce((acc, r) => acc + (r.usage ?? 0), 0);
   const averageDailyUsage = totalUsage / 365;
 
   // A more sophisticated savings projection would model the interaction between solar, battery, and usage.
@@ -95,7 +97,10 @@ export async function handleNem3Model(request: Request, env: Env): Promise<Respo
   const projectedSavings = Math.min(averageDailyUsage, systemCapacity * 4) * 365 * 0.3; // Assume 4 kWh/kW/day average production, $0.30/kWh
 
   if (!env.OPENAI_API_KEY) {
-    return new Response('OPENAI_API_KEY is not configured', { status: 500 });
+    return new Response(JSON.stringify({ error: 'OPENAI_API_KEY is not configured' }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   const openai = new OpenAI({

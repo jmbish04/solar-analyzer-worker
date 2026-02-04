@@ -1,4 +1,5 @@
-import { execute } from '../db/client';
+import { getDb } from '../db/client';
+import { pgeUsage } from '../db/schema';
 
 function parseCsv(data: string): Array<Record<string, string>> {
   const [headerLine, ...lines] = data.trim().split(/\r?\n/);
@@ -12,7 +13,7 @@ function parseCsv(data: string): Array<Record<string, string>> {
 }
 
 function to24Hour(time: string): string {
-  const [hour, minute] = time.split(':');
+  const [hour] = time.split(':');
   return hour.padStart(2, '0');
 }
 
@@ -26,7 +27,9 @@ export async function handleUploadPgeUsage(request: Request, env: Env): Promise<
     rows = parseCsv(text);
   }
 
+  const db = getDb(env.DB);
   let inserted = 0;
+
   for (const row of rows) {
     const type = row['TYPE'] || row['type'];
     if (!type || !type.toLowerCase().includes('electric')) continue;
@@ -35,7 +38,10 @@ export async function handleUploadPgeUsage(request: Request, env: Env): Promise<
     const usage = parseFloat(row['USAGE (kWh)'] || row['usage']);
     if (!date || !start || isNaN(usage)) continue;
     const hour = to24Hour(start);
-    await execute(env.DB, 'INSERT OR IGNORE INTO pge_usage (date, hour, usage, units) VALUES (?, ?, ?, ?)', [date, hour, usage, 'kWh']);
+    
+    await db.insert(pgeUsage)
+      .values({ date, hour, usage, units: 'kWh' })
+      .onConflictDoNothing();
     inserted++;
   }
   return new Response(JSON.stringify({ inserted }), { headers: { 'Content-Type': 'application/json' } });

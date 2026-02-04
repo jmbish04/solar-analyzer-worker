@@ -1,21 +1,28 @@
-import { execute, queryDB } from '../db/client';
+import { getDb } from '../db/client';
+import { pgeRates } from '../db/schema';
 import OpenAI from 'openai';
+import { desc, between, like } from 'drizzle-orm';
 
 /**
- * Handles the request to refresh PGE rates by scraping a PDF from a URL.
+ * Handles the request to refresh PGE rates using AI to provide typical rate estimates.
+ * Note: This endpoint generates estimated PG&E EV2 rates using AI rather than scraping actual PDFs.
  */
 export async function handleRefreshPgeRates(request: Request, env: Env): Promise<Response> {
   let requestBody: { url?: string } | null = null;
   try {
     requestBody = await request.json();
   } catch (error) {
-    // Allow empty body to use default URL
+    // Allow empty body
   }
 
-  const pdfUrl = requestBody?.url || 'https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV2%20(Sch).pdf';
+  // Store the reference URL for record-keeping (not actually fetched)
+  const sourceUrl = requestBody?.url || 'https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV2%20(Sch).pdf';
 
   if (!env.OPENAI_API_KEY) {
-    return new Response(JSON.stringify({ error: 'OPENAI_API_KEY is not configured' }), { status: 500 });
+    return new Response(JSON.stringify({ error: 'OPENAI_API_KEY is not configured' }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   const openai = new OpenAI({
@@ -25,12 +32,11 @@ export async function handleRefreshPgeRates(request: Request, env: Env): Promise
   const model = env.OPENAI_MODEL || 'gpt-4o-mini';
 
   const prompt = `
-    You are an expert data extraction bot. Your task is to provide PG&E electricity rate information.
-    Based on typical PG&E EV2 rates (as the PDF at ${pdfUrl} may not be directly accessible), provide estimated rates.
+    You are an expert on California utility rates. Provide typical PG&E EV2 electricity rate information.
     
     **Instructions:**
     1. Provide electricity rates for **summer** and **winter** seasons. For each season, provide the cost per kWh for **peak**, **partial-peak**, and **off-peak** periods.
-    2. Use a recent **effective date** (use today's date or a recent date).
+    2. Use today's date as the **effective date**.
     3. Calculate the **expiration date**, which is exactly one year after the effective date.
     4. Respond with **ONLY** a single, raw JSON object containing the data in this exact format:
     {
@@ -66,15 +72,30 @@ export async function handleRefreshPgeRates(request: Request, env: Env): Promise
     // Basic validation to ensure all required fields are present
     if (!ratesData.rates || !ratesData.effectiveDate || !ratesData.expirationDate) {
         console.error("OpenAI response missing required fields:", ratesData);
-        return new Response(JSON.stringify({ error: 'Failed to extract all required fields.' }), { status: 500 });
+        return new Response(JSON.stringify({ error: 'Failed to extract all required fields.' }), { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
     }
 
-    // Upsert the data into the D1 database
-    await execute(
-      env.DB,
-      'INSERT INTO pge_rates (effective_date, expiration_date, source_url, rates_json) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(effective_date) DO UPDATE SET expiration_date=excluded.expiration_date, source_url=excluded.source_url, rates_json=excluded.rates_json',
-      [ratesData.effectiveDate, ratesData.expirationDate, pdfUrl, JSON.stringify(ratesData.rates)]
-    );
+    const db = getDb(env.DB);
+    
+    // Upsert the data using Drizzle
+    await db.insert(pgeRates)
+      .values({
+        effectiveDate: ratesData.effectiveDate,
+        expirationDate: ratesData.expirationDate,
+        sourceUrl: sourceUrl,
+        ratesJson: JSON.stringify(ratesData.rates)
+      })
+      .onConflictDoUpdate({
+        target: pgeRates.effectiveDate,
+        set: {
+          expirationDate: ratesData.expirationDate,
+          sourceUrl: sourceUrl,
+          ratesJson: JSON.stringify(ratesData.rates)
+        }
+      });
 
     return new Response(JSON.stringify({ success: true, data: ratesData }), {
       headers: { 'Content-Type': 'application/json' },
@@ -82,7 +103,10 @@ export async function handleRefreshPgeRates(request: Request, env: Env): Promise
 
   } catch (error: any) {
     console.error('Error calling OpenAI API or processing response:', error);
-    return new Response(JSON.stringify({ error: 'An internal error occurred.', details: error.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: 'An internal error occurred.', details: error.message }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }
 
@@ -97,32 +121,31 @@ export async function handleGetPgeRates(request: Request, env: Env): Promise<Res
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
 
-    let query = 'SELECT effective_date, expiration_date, source_url, rates_json FROM pge_rates';
-    const conditions: string[] = [];
-    const params: any[] = [];
-
-    if (startDate && endDate) {
-        conditions.push('effective_date BETWEEN ? AND ?');
-        params.push(startDate, endDate);
-    } else if (year) {
-        conditions.push("strftime('%Y', effective_date) = ?");
-        params.push(year);
-    }
-
-    if (conditions.length > 0) {
-        query += ' WHERE ' + conditions.join(' AND ');
-    }
-    query += ' ORDER BY effective_date DESC';
+    const db = getDb(env.DB);
 
     try {
-        const results = await queryDB<any>(env.DB, query, params);
+        let query = db.select().from(pgeRates);
+        
+        // Build query based on filters
+        let results;
+        if (startDate && endDate) {
+            results = await query
+              .where(between(pgeRates.effectiveDate, startDate, endDate))
+              .orderBy(desc(pgeRates.effectiveDate));
+        } else if (year) {
+            results = await query
+              .where(like(pgeRates.effectiveDate, `${year}%`))
+              .orderBy(desc(pgeRates.effectiveDate));
+        } else {
+            results = await query.orderBy(desc(pgeRates.effectiveDate));
+        }
 
         let processedResults = results.map(row => {
-            const rates = JSON.parse(row.rates_json);
+            const rates = JSON.parse(row.ratesJson);
             return {
-                effectiveDate: row.effective_date,
-                expirationDate: row.expiration_date,
-                sourceUrl: row.source_url,
+                effectiveDate: row.effectiveDate,
+                expirationDate: row.expirationDate,
+                sourceUrl: row.sourceUrl,
                 rates: rates
             };
         });
@@ -150,7 +173,10 @@ export async function handleGetPgeRates(request: Request, env: Env): Promise<Res
         return new Response(JSON.stringify(processedResults), { headers: { 'Content-Type': 'application/json' } });
     } catch (error: any) {
         console.error('Error fetching PGE rates:', error);
-        return new Response(JSON.stringify({ error: 'Failed to fetch rates.', details: error.message }), { status: 500 });
+        return new Response(JSON.stringify({ error: 'Failed to fetch rates.', details: error.message }), { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
     }
 }
 
@@ -160,31 +186,58 @@ export async function handleGetPgeRates(request: Request, env: Env): Promise<Res
  */
 export async function handleUpdatePgeRates(request: Request, env: Env): Promise<Response> {
     if (request.method !== 'POST') {
-        return new Response('Expected POST', { status: 405 });
+        return new Response(JSON.stringify({ error: 'Expected POST' }), { 
+          status: 405,
+          headers: { 'Content-Type': 'application/json' }
+        });
     }
 
     try {
         const { effectiveDate, expirationDate, sourceUrl, rates } = await request.json<any>();
 
         if (!effectiveDate || !expirationDate || !rates) {
-            return new Response('Missing required fields: effectiveDate, expirationDate, and rates are required.', { status: 400 });
+            return new Response(JSON.stringify({ error: 'Missing required fields: effectiveDate, expirationDate, and rates are required.' }), { 
+              status: 400,
+              headers: { 'Content-Type': 'application/json' }
+            });
         }
 
         // Basic validation of the rates object
         if (typeof rates !== 'object' || (!rates.summer && !rates.winter)) {
-            return new Response('Invalid "rates" object structure.', { status: 400 });
+            return new Response(JSON.stringify({ error: 'Invalid "rates" object structure.' }), { 
+              status: 400,
+              headers: { 'Content-Type': 'application/json' }
+            });
         }
 
-        await execute(
-            env.DB,
-            'INSERT INTO pge_rates (effective_date, expiration_date, source_url, rates_json) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(effective_date) DO UPDATE SET expiration_date=excluded.expiration_date, source_url=excluded.source_url, rates_json=excluded.rates_json',
-            [effectiveDate, expirationDate, sourceUrl || null, JSON.stringify(rates)]
-        );
+        const db = getDb(env.DB);
+        
+        await db.insert(pgeRates)
+          .values({
+            effectiveDate,
+            expirationDate,
+            sourceUrl: sourceUrl || null,
+            ratesJson: JSON.stringify(rates)
+          })
+          .onConflictDoUpdate({
+            target: pgeRates.effectiveDate,
+            set: {
+              expirationDate,
+              sourceUrl: sourceUrl || null,
+              ratesJson: JSON.stringify(rates)
+            }
+          });
 
-        return new Response(JSON.stringify({ success: true }), { status: 200 });
+        return new Response(JSON.stringify({ success: true }), { 
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
 
     } catch (error: any) {
         console.error('Error updating PGE rates:', error);
-        return new Response(JSON.stringify({ error: 'Failed to update rates.', details: error.message }), { status: 500 });
+        return new Response(JSON.stringify({ error: 'Failed to update rates.', details: error.message }), { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
     }
 }

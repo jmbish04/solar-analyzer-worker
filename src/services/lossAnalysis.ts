@@ -1,12 +1,6 @@
-import { queryDB } from '../db/client';
-
-interface HourRecord {
-  date: string;
-  hour: string;
-  usage: number;
-  pv: number;
-  expected_pv: number;
-}
+import { getDb } from '../db/client';
+import { pgeUsage, pvwattsHourly, pvwattsHourlyExpected } from '../db/schema';
+import { between } from 'drizzle-orm';
 
 const OFF_PEAK = 0.25;
 const PEAK = 0.35;
@@ -20,41 +14,63 @@ export async function handleLossAnalysis(request: Request, env: Env): Promise<Re
   const startStr = searchParams.get('start');
   const endStr = searchParams.get('end');
   if (!startStr || !endStr) {
-    return new Response('missing start or end', { status: 400 });
+    return new Response(JSON.stringify({ error: 'missing start or end' }), { 
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
-  // This query assumes you have a table or view with expected PV generation
-  // You may need to adjust this based on your actual schema
-  const hours = await queryDB<HourRecord>(
-    env.DB,
-    `SELECT
-       u.date,
-       u.hour,
-       u.usage,
-       coalesce(p_actual.ac_wh, 0) as pv,
-       coalesce(p_expected.ac_wh, 0) as expected_pv
-     FROM pge_usage u
-     LEFT JOIN pvwatts_hourly p_actual ON u.date = p_actual.date AND u.hour = p_actual.hour
-     LEFT JOIN pvwatts_hourly_expected p_expected ON u.date = p_expected.date AND u.hour = p_expected.hour
-     WHERE u.date BETWEEN ? AND ?
-     ORDER BY u.date, u.hour`,
-    [startStr, endStr]
-  );
+  const db = getDb(env.DB);
+
+  // Get usage data
+  const usageData = await db
+    .select()
+    .from(pgeUsage)
+    .where(between(pgeUsage.date, startStr, endStr))
+    .orderBy(pgeUsage.date, pgeUsage.hour);
+
+  // Get actual PV data
+  const actualPvData = await db
+    .select()
+    .from(pvwattsHourly)
+    .where(between(pvwattsHourly.date, startStr, endStr));
+
+  // Get expected PV data
+  const expectedPvData = await db
+    .select()
+    .from(pvwattsHourlyExpected)
+    .where(between(pvwattsHourlyExpected.date, startStr, endStr));
+
+  // Create maps for quick lookup
+  const actualPvMap = new Map<string, number>();
+  for (const pv of actualPvData) {
+    actualPvMap.set(`${pv.date}-${pv.hour}`, pv.acWh ?? 0);
+  }
+
+  const expectedPvMap = new Map<string, number>();
+  for (const pv of expectedPvData) {
+    expectedPvMap.set(`${pv.date}-${pv.hour}`, pv.acWh ?? 0);
+  }
 
   let totalLoss = 0;
   const monthlyComparison = new Map<string, { month: string; expectedCost: number; actualCost: number }>();
 
-  for (const h of hours) {
+  for (const h of usageData) {
     const rate = rateForHour(parseInt(h.hour));
     const month = h.date.substring(0, 7);
+    const key = `${h.date}-${h.hour}`;
 
     if (!monthlyComparison.has(month)) {
       monthlyComparison.set(month, { month, expectedCost: 0, actualCost: 0 });
     }
     const monthData = monthlyComparison.get(month)!;
 
-    const actualNet = h.usage - h.pv;
-    const expectedNet = h.usage - h.expected_pv;
+    const usage = h.usage ?? 0;
+    const pv = actualPvMap.get(key) ?? 0;
+    const expectedPv = expectedPvMap.get(key) ?? 0;
+
+    const actualNet = usage - pv;
+    const expectedNet = usage - expectedPv;
 
     const actualCost = actualNet * rate;
     const expectedCost = expectedNet * rate;
