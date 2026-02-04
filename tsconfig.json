@@ -21,10 +21,8 @@
     /* Enable error reporting in type-checked JavaScript files. */
 		"checkJs": false,
 
-    /* Disable emitting files from a compilation. */
-		"outDir": "dist",
-    "rootDir": ".",
-    "noEmit": false,
+    /* Disable emitting files from a compilation - Wrangler bundles TypeScript directly */
+		"noEmit": true,
 
     /* Ensure that each file can be safely transpiled without relying on other imports. */
 		"isolatedModules": true,
@@ -39,10 +37,9 @@
     /* Skip type checking all .d.ts files. */
 		"skipLibCheck": true,
 		"types": [
-			"./worker-configuration.d.ts",
-			"@cloudflare/workers-types"
+			"./worker-configuration.d.ts"
 		]
 	},
-	"exclude": ["test"],
-	"include": ["worker-configuration.d.ts", "src/**/*.ts", "public"]
+	"exclude": ["test", "frontend", "node_modules"],
+	"include": ["worker-configuration.d.ts", "src/**/*.ts"]
 }

@@ -1,4 +1,7 @@
-import { queryDB } from '../db/client';
+import { getDb } from '../db/client';
+import { pgeUsage, pvwattsHourly } from '../db/schema';
+import OpenAI from 'openai';
+import { eq } from 'drizzle-orm';
 
 interface HourRecord {
   hour: string;
@@ -6,9 +9,7 @@ interface HourRecord {
   pv: number;
 }
 
-async function generateDailySummary(ai: any, date: string, hours: HourRecord[]): Promise<string> {
-  const model = ai;
-
+async function generateDailySummary(openai: OpenAI, model: string, date: string, hours: HourRecord[]): Promise<string> {
   const prompt = `
     Analyze the following hourly energy data for ${date}.
     The data includes electricity usage and solar PV generation in watt-hours.
@@ -24,8 +25,22 @@ async function generateDailySummary(ai: any, date: string, hours: HourRecord[]):
   `;
 
   try {
-    const result = await model.run('@cf/meta/llama-2-7b-chat-int8', { prompt });
-    return result.response;
+    const completion = await openai.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an energy analyst helping homeowners understand their solar energy production and consumption patterns.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: 500,
+    });
+    
+    return completion.choices[0]?.message?.content || 'Summary could not be generated.';
   } catch (error) {
     console.error('Error generating daily summary:', error);
     return 'AI summary could not be generated at this time.';
@@ -36,24 +51,61 @@ export async function handleDailySummary(request: Request, env: Env): Promise<Re
   const { searchParams } = new URL(request.url);
   const dateStr = searchParams.get('date');
   if (!dateStr) {
-    return new Response('missing date', { status: 400 });
+    return new Response(JSON.stringify({ error: 'missing date' }), { 
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
-  const hours = await queryDB<HourRecord>(
-    env.DB,
-    `SELECT u.hour, u.usage, coalesce(p.ac_wh, 0) as pv
-     FROM pge_usage u
-     LEFT JOIN pvwatts_hourly p ON u.date = p.date AND u.hour = p.hour
-     WHERE u.date = ?
-     ORDER BY u.hour`,
-    [dateStr]
-  );
+  const db = getDb(env.DB);
+
+  // Get usage data for the date
+  const usageData = await db
+    .select()
+    .from(pgeUsage)
+    .where(eq(pgeUsage.date, dateStr))
+    .orderBy(pgeUsage.hour);
+
+  // Get PV data for the date
+  const pvData = await db
+    .select()
+    .from(pvwattsHourly)
+    .where(eq(pvwattsHourly.date, dateStr));
+
+  // Create a map for quick PV lookup
+  const pvMap = new Map<string, number>();
+  for (const pv of pvData) {
+    pvMap.set(pv.hour, pv.acWh ?? 0);
+  }
+
+  // Combine the data
+  const hours: HourRecord[] = usageData.map(u => ({
+    hour: u.hour,
+    usage: u.usage ?? 0,
+    pv: pvMap.get(u.hour) ?? 0
+  }));
 
   if (hours.length === 0) {
-    return new Response('No data for this date', { status: 404 });
+    return new Response(JSON.stringify({ error: 'No data for this date' }), { 
+      status: 404,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
-  const summary = await generateDailySummary(env.AI, dateStr, hours);
+  if (!env.OPENAI_API_KEY) {
+    return new Response(JSON.stringify({ error: 'OPENAI_API_KEY is not configured' }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const openai = new OpenAI({
+    apiKey: env.OPENAI_API_KEY,
+  });
+  
+  const model = env.OPENAI_MODEL || 'gpt-4o-mini';
+
+  const summary = await generateDailySummary(openai, model, dateStr, hours);
 
   return new Response(JSON.stringify({ date: dateStr, summary, hours }), {
     headers: { 'Content-Type': 'application/json' },
