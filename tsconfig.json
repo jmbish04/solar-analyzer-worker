@@ -21,10 +21,8 @@
     /* Enable error reporting in type-checked JavaScript files. */
 		"checkJs": false,
 
-    /* Disable emitting files from a compilation. */
-		"outDir": "dist",
-    "rootDir": ".",
-    "noEmit": false,
+    /* Disable emitting files from a compilation - Wrangler bundles TypeScript directly */
+		"noEmit": true,
 
     /* Ensure that each file can be safely transpiled without relying on other imports. */
 		"isolatedModules": true,
