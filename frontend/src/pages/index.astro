@@ -1,0 +1,267 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Card from '../components/Card.astro';
+import Button from '../components/Button.astro';
+import { NemComparisonChart } from '../components/NemComparisonChart';
+import { CostComparisonChart } from '../components/CostComparisonChart';
+import { EnergyProfileChart } from '../components/EnergyProfileChart';
+---
+
+<Layout title="Solar Analyzer - Dashboard">
+  <div class="container py-8">
+    <div class="flex flex-col gap-6">
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight text-foreground">Solar Financial Analysis</h1>
+        <p class="text-muted-foreground mt-2">
+          Compare NEM 2.0 vs NEM 3.0 costs and model your solar investment
+        </p>
+      </div>
+
+      <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <Card title="NEM Comparison" description="Compare your costs under NEM 2.0 vs NEM 3.0">
+          <form id="nem-form" class="space-y-4">
+            <div class="space-y-2">
+              <label for="start" class="text-sm font-medium text-foreground">Start Date</label>
+              <input
+                type="date"
+                id="start"
+                name="start"
+                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+            <div class="space-y-2">
+              <label for="end" class="text-sm font-medium text-foreground">End Date</label>
+              <input
+                type="date"
+                id="end"
+                name="end"
+                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+            <Button type="submit">Run Analysis</Button>
+          </form>
+        </Card>
+
+        <Card title="NEM 3.0 Modeling" description="Model solar + battery investment scenarios">
+          <form id="model-form" class="space-y-4">
+            <div class="space-y-2">
+              <label for="systemCapacity" class="text-sm font-medium text-foreground">System Capacity (kW)</label>
+              <input
+                type="number"
+                id="systemCapacity"
+                name="systemCapacity"
+                step="0.1"
+                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+            <div class="space-y-2">
+              <label for="batteryCapacity" class="text-sm font-medium text-foreground">Battery Capacity (kWh)</label>
+              <input
+                type="number"
+                id="batteryCapacity"
+                name="batteryCapacity"
+                step="0.1"
+                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+            <Button type="submit">Calculate</Button>
+          </form>
+        </Card>
+
+        <Card title="Data Status" description="Check the status of your data">
+          <div class="space-y-3" id="data-status">
+            <div class="flex items-center justify-between text-sm">
+              <span class="text-muted-foreground">PVWatts Data</span>
+              <span id="pvwatts-status" class="text-yellow-500">Loading...</span>
+            </div>
+            <div class="flex items-center justify-between text-sm">
+              <span class="text-muted-foreground">Sunrise/Sunset Data</span>
+              <span id="sunrise-status" class="text-yellow-500">Loading...</span>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div class="grid gap-6 lg:grid-cols-2">
+        <Card title="Analysis Results" description="View your NEM comparison results">
+          <div id="results" class="space-y-4">
+            <p class="text-muted-foreground text-sm">Run an analysis to see results</p>
+          </div>
+        </Card>
+
+        <Card title="Cost Comparison" description="Visual breakdown of NEM 2.0 vs NEM 3.0">
+          <div id="cost-chart-container" class="h-64">
+            <div class="flex h-full items-center justify-center text-muted-foreground text-sm">
+              Run an analysis to see the chart
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <Card title="Hourly Cost Difference" description="NEM 3.0 cost minus NEM 2.0 cost per hour">
+        <div id="hourly-chart-container" class="h-72">
+          <div class="flex h-full items-center justify-center text-muted-foreground text-sm">
+            Run an analysis to see the chart
+          </div>
+        </div>
+      </Card>
+    </div>
+  </div>
+
+  <script>
+    import { createRoot } from 'react-dom/client';
+    import React from 'react';
+    import { NemComparisonChart } from '../components/NemComparisonChart';
+    import { CostComparisonChart } from '../components/CostComparisonChart';
+
+    let hourlyChartRoot: ReturnType<typeof createRoot> | null = null;
+    let costChartRoot: ReturnType<typeof createRoot> | null = null;
+
+    function renderCharts(data: any) {
+      // Render hourly chart
+      const hourlyContainer = document.getElementById('hourly-chart-container');
+      if (hourlyContainer && data.hours?.length) {
+        hourlyContainer.innerHTML = '';
+        if (!hourlyChartRoot) {
+          hourlyChartRoot = createRoot(hourlyContainer);
+        }
+        hourlyChartRoot.render(React.createElement(NemComparisonChart, { data: data.hours }));
+      }
+
+      // Render cost comparison chart  
+      const costContainer = document.getElementById('cost-chart-container');
+      if (costContainer && data.costNEM2 !== undefined) {
+        costContainer.innerHTML = '';
+        if (!costChartRoot) {
+          costChartRoot = createRoot(costContainer);
+        }
+        costChartRoot.render(React.createElement(CostComparisonChart, { 
+          nem2Cost: data.costNEM2, 
+          nem3Cost: data.costNEM3 
+        }));
+      }
+    }
+
+    async function loadDataStatus() {
+      try {
+        const [pvRes, sunRes] = await Promise.all([
+          fetch('/api/data-status/pvwatts'),
+          fetch('/api/data-status/sunrise-sunset')
+        ]);
+        
+        const pvData = await pvRes.json();
+        const sunData = await sunRes.json();
+        
+        const pvStatus = document.getElementById('pvwatts-status');
+        const sunStatus = document.getElementById('sunrise-status');
+        
+        if (pvStatus) {
+          pvStatus.textContent = pvData.lastRecordedDate || 'No data';
+          pvStatus.className = pvData.lastRecordedDate ? 'text-green-500' : 'text-red-500';
+        }
+        
+        if (sunStatus) {
+          sunStatus.textContent = sunData.lastRecordedDate || 'No data';
+          sunStatus.className = sunData.lastRecordedDate ? 'text-green-500' : 'text-red-500';
+        }
+      } catch (e) {
+        console.error('Failed to load data status', e);
+      }
+    }
+
+    document.getElementById('nem-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target as HTMLFormElement;
+      const formData = new FormData(form);
+      const start = formData.get('start');
+      const end = formData.get('end');
+      
+      if (!start || !end) {
+        alert('Please select both start and end dates');
+        return;
+      }
+      
+      try {
+        const res = await fetch(`/api/analysis/nem2vnem3?start=${start}&end=${end}`);
+        const data = await res.json();
+        
+        const resultsDiv = document.getElementById('results');
+        if (resultsDiv) {
+          resultsDiv.innerHTML = `
+            <div class="grid grid-cols-2 gap-4">
+              <div class="p-4 rounded-lg bg-secondary">
+                <p class="text-sm text-muted-foreground">NEM 2.0 Cost</p>
+                <p class="text-2xl font-bold text-foreground">$${data.costNEM2.toFixed(2)}</p>
+              </div>
+              <div class="p-4 rounded-lg bg-secondary">
+                <p class="text-sm text-muted-foreground">NEM 3.0 Cost</p>
+                <p class="text-2xl font-bold text-foreground">$${data.costNEM3.toFixed(2)}</p>
+              </div>
+              <div class="col-span-2 p-4 rounded-lg ${data.diff > 0 ? 'bg-red-500/10' : 'bg-green-500/10'}">
+                <p class="text-sm text-muted-foreground">Difference (NEM3 - NEM2)</p>
+                <p class="text-2xl font-bold ${data.diff > 0 ? 'text-red-500' : 'text-green-500'}">$${data.diff.toFixed(2)}</p>
+              </div>
+            </div>
+            ${data.analysis ? `<div class="mt-4 p-4 rounded-lg bg-secondary text-sm text-foreground whitespace-pre-wrap">${data.analysis}</div>` : ''}
+          `;
+        }
+        
+        // Render charts with data
+        renderCharts(data);
+      } catch (e) {
+        console.error('Analysis failed', e);
+        alert('Analysis failed. Please try again.');
+      }
+    });
+
+    document.getElementById('model-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target as HTMLFormElement;
+      const formData = new FormData(form);
+      
+      const systemCapacity = formData.get('systemCapacity');
+      const batteryCapacity = formData.get('batteryCapacity');
+      
+      if (!systemCapacity) {
+        alert('Please enter system capacity');
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/analysis/nem3_model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemCapacity: parseFloat(systemCapacity as string),
+            batteryCapacity: batteryCapacity ? parseFloat(batteryCapacity as string) : 0
+          })
+        });
+        
+        const data = await res.json();
+        
+        const resultsDiv = document.getElementById('results');
+        if (resultsDiv) {
+          resultsDiv.innerHTML = `
+            <div class="grid grid-cols-2 gap-4">
+              <div class="p-4 rounded-lg bg-secondary">
+                <p class="text-sm text-muted-foreground">System Cost</p>
+                <p class="text-2xl font-bold text-foreground">$${data.newSystemCost?.toFixed(2) || 'N/A'}</p>
+              </div>
+              <div class="p-4 rounded-lg bg-secondary">
+                <p class="text-sm text-muted-foreground">Projected Savings/Year</p>
+                <p class="text-2xl font-bold text-green-500">$${data.projectedSavings?.toFixed(2) || 'N/A'}</p>
+              </div>
+            </div>
+            ${data.analysis ? `<div class="mt-4 p-4 rounded-lg bg-secondary text-sm text-foreground whitespace-pre-wrap">${data.analysis}</div>` : ''}
+          `;
+        }
+      } catch (e) {
+        console.error('Modeling failed', e);
+        alert('Modeling failed. Please try again.');
+      }
+    });
+
+    // Load data status on page load
+    loadDataStatus();
+  </script>
+</Layout>

@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import OpenAI from 'openai';
 import { queryDB } from '../db/client';
 
 interface HourRecord {
@@ -6,15 +6,13 @@ interface HourRecord {
 }
 
 async function generateEnhancedNem3Analysis(
-  geminiAPIKey: string,
+  openai: OpenAI,
+  model: string,
   system_capacity: number,
   battery_capacity: number,
   projected_savings: number,
   new_system_cost: number
 ): Promise<string> {
-  const genAI = new GoogleGenerativeAI(geminiAPIKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
   const prompt = `
     **NEM 3.0 Financial Analysis**
 
@@ -50,9 +48,22 @@ async function generateEnhancedNem3Analysis(
   `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    const completion = await openai.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a solar energy financial analyst specializing in California NEM policies.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: 1500,
+    });
+    
+    return completion.choices[0]?.message?.content || 'Analysis could not be generated.';
   } catch (error) {
     console.error('Error generating NEM 3.0 analysis:', error);
     return 'AI analysis could not be generated at this time.';
@@ -83,12 +94,19 @@ export async function handleNem3Model(request: Request, env: Env): Promise<Respo
   // For now, we'll use a more refined estimate.
   const projectedSavings = Math.min(averageDailyUsage, systemCapacity * 4) * 365 * 0.3; // Assume 4 kWh/kW/day average production, $0.30/kWh
 
-  if (!env.GEMINI_API_KEY) {
-    return new Response('GEMINI_API_KEY is not configured', { status: 500 });
+  if (!env.OPENAI_API_KEY) {
+    return new Response('OPENAI_API_KEY is not configured', { status: 500 });
   }
 
+  const openai = new OpenAI({
+    apiKey: env.OPENAI_API_KEY,
+  });
+  
+  const model = env.OPENAI_MODEL || 'gpt-4o-mini';
+
   const analysis = await generateEnhancedNem3Analysis(
-    env.GEMINI_API_KEY,
+    openai,
+    model,
     systemCapacity,
     batteryCapacity || 0,
     projectedSavings,

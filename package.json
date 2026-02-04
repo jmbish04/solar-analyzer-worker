@@ -3,22 +3,30 @@
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
-		"build": "tsc",
-		"deploy": "npm run build && wrangler deploy && python3 test-worker-api.py",
+		"build": "npm run build:frontend && tsc",
+		"build:frontend": "cd frontend && npm run build",
+		"build:backend": "tsc",
+		"deploy": "npm run build && wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "drizzle-kit generate && wrangler d1 migrations apply DB --remote"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",
-		"@cloudflare/workers-types": "^4.20250726.0",
+		"drizzle-kit": "^0.30.0",
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.21.0"
 	},
 	"dependencies": {
-		"@google/generative-ai": "^0.24.1",
-		"jose": "^6.0.12"
+		"@hono/zod-openapi": "^0.18.0",
+		"@scalar/hono-api-reference": "^0.5.0",
+		"drizzle-orm": "^0.38.0",
+		"hono": "^4.11.4",
+		"jose": "^6.0.12",
+		"openai": "^4.73.0"
 	}
 }

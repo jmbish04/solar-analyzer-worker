@@ -1,5 +1,5 @@
 import { queryDB } from '../db/client';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import OpenAI from 'openai';
 
 interface HourRecord {
   date: string;
@@ -16,14 +16,12 @@ function rateForHour(h: number): number {
 }
 
 async function generateNemAnalysis(
-  geminiAPIKey: string,
+  openai: OpenAI,
+  model: string,
   costNEM2: number,
   costNEM3: number,
   diff: number
 ): Promise<string> {
-  const genAI = new GoogleGenerativeAI(geminiAPIKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
   const prompt = `
     Analyze the following Net Energy Metering (NEM) cost comparison.
     NEM 2.0 Cost: ${costNEM2.toFixed(2)}
@@ -38,9 +36,22 @@ async function generateNemAnalysis(
   `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    const completion = await openai.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an energy policy expert specializing in California solar net metering programs.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: 800,
+    });
+    
+    return completion.choices[0]?.message?.content || 'Analysis could not be generated.';
   } catch (error) {
     console.error('Error generating NEM analysis:', error);
     return 'AI analysis could not be generated at this time.';
@@ -87,11 +98,17 @@ export async function handleNemAnalysis(request: Request, env: Env): Promise<Res
   }
   const diff = costNEM3 - costNEM2;
 
-  if (!env.GEMINI_API_KEY) {
-    return new Response('GEMINI_API_KEY is not configured', { status: 500 });
+  if (!env.OPENAI_API_KEY) {
+    return new Response('OPENAI_API_KEY is not configured', { status: 500 });
   }
 
-  const analysis = await generateNemAnalysis(env.GEMINI_API_KEY, costNEM2, costNEM3, diff);
+  const openai = new OpenAI({
+    apiKey: env.OPENAI_API_KEY,
+  });
+  
+  const model = env.OPENAI_MODEL || 'gpt-4o-mini';
+
+  const analysis = await generateNemAnalysis(openai, model, costNEM2, costNEM3, diff);
 
   return new Response(JSON.stringify({ costNEM2, costNEM3, diff, analysis, hours: detailedHours }), {
     headers: { 'Content-Type': 'application/json' },

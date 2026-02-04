@@ -1,4 +1,5 @@
 import { queryDB } from '../db/client';
+import OpenAI from 'openai';
 
 interface HourRecord {
   hour: string;
@@ -6,9 +7,7 @@ interface HourRecord {
   pv: number;
 }
 
-async function generateDailySummary(ai: any, date: string, hours: HourRecord[]): Promise<string> {
-  const model = ai;
-
+async function generateDailySummary(openai: OpenAI, model: string, date: string, hours: HourRecord[]): Promise<string> {
   const prompt = `
     Analyze the following hourly energy data for ${date}.
     The data includes electricity usage and solar PV generation in watt-hours.
@@ -24,8 +23,22 @@ async function generateDailySummary(ai: any, date: string, hours: HourRecord[]):
   `;
 
   try {
-    const result = await model.run('@cf/meta/llama-2-7b-chat-int8', { prompt });
-    return result.response;
+    const completion = await openai.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an energy analyst helping homeowners understand their solar energy production and consumption patterns.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: 500,
+    });
+    
+    return completion.choices[0]?.message?.content || 'Summary could not be generated.';
   } catch (error) {
     console.error('Error generating daily summary:', error);
     return 'AI summary could not be generated at this time.';
@@ -53,7 +66,17 @@ export async function handleDailySummary(request: Request, env: Env): Promise<Re
     return new Response('No data for this date', { status: 404 });
   }
 
-  const summary = await generateDailySummary(env.AI, dateStr, hours);
+  if (!env.OPENAI_API_KEY) {
+    return new Response('OPENAI_API_KEY is not configured', { status: 500 });
+  }
+
+  const openai = new OpenAI({
+    apiKey: env.OPENAI_API_KEY,
+  });
+  
+  const model = env.OPENAI_MODEL || 'gpt-4o-mini';
+
+  const summary = await generateDailySummary(openai, model, dateStr, hours);
 
   return new Response(JSON.stringify({ date: dateStr, summary, hours }), {
     headers: { 'Content-Type': 'application/json' },
