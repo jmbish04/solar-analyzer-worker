@@ -88,9 +88,11 @@ export async function handleNem3Model(request: Request, env: Env): Promise<Respo
   const db = getDb(env.DB);
   
   // Fetch historical usage data to project savings more accurately
+  // Filter out records with null usage values to ensure accurate calculations
   const usageRecords = await db.select({ usage: pgeUsage.usage }).from(pgeUsage);
-  const totalUsage = usageRecords.reduce((acc, r) => acc + (r.usage ?? 0), 0);
-  const averageDailyUsage = totalUsage / 365;
+  const validUsageRecords = usageRecords.filter((r): r is { usage: number } => r.usage !== null);
+  const totalUsage = validUsageRecords.reduce((acc, r) => acc + r.usage, 0);
+  const averageDailyUsage = validUsageRecords.length > 0 ? totalUsage / 365 : 0;
 
   // A more sophisticated savings projection would model the interaction between solar, battery, and usage.
   // For now, we'll use a more refined estimate.

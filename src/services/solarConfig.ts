@@ -59,14 +59,26 @@ export async function handleGetSolarConfig(request: Request, env: Env): Promise<
     }
 
     const dbConfig = dbResult[0];
+    
+    // Validate that optional fields have values - if not, return error indicating incomplete config
+    if (dbConfig.panelCount === null || dbConfig.panelOutputWatts === null || 
+        dbConfig.latitude === null || dbConfig.longitude === null) {
+      return new Response(JSON.stringify({ 
+        error: 'Incomplete solar configuration. Missing required fields: panelCount, panelOutputWatts, latitude, or longitude.' 
+      }), { 
+        status: 422,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
     const apiConfig: SolarConfigApi = {
-      panelCount: dbConfig.panelCount ?? 0,
-      panelOutputWatts: dbConfig.panelOutputWatts ?? 0,
+      panelCount: dbConfig.panelCount,
+      panelOutputWatts: dbConfig.panelOutputWatts,
       systemCapacityKw: dbConfig.systemCapacityKw,
       panelTilt: dbConfig.panelTilt,
       panelAzimuth: dbConfig.panelAzimuth,
-      latitude: dbConfig.latitude ?? 0,
-      longitude: dbConfig.longitude ?? 0,
+      latitude: dbConfig.latitude,
+      longitude: dbConfig.longitude,
     };
 
     return new Response(JSON.stringify(apiConfig), {
