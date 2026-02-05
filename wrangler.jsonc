@@ -8,6 +8,9 @@
   "assets": {
     "directory": "./public"
   },
+  "build": {
+    "command": "npm run build"
+  },
 
   "observability": {
     "enabled": true
